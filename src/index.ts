@@ -1,18 +1,37 @@
-/**
- * Welcome to Cloudflare Workers! This is your first worker.
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your worker in action
- * - Run `npm run deploy` to publish your worker
- *
- * Bind resources to your worker in `wrangler.toml`. After adding bindings, a type definition for the
- * `Env` object can be regenerated with `npm run cf-typegen`.
- *
- * Learn more at https://developers.cloudflare.com/workers/
- */
+import { v4 as uuidv4 } from 'uuid';
+import { GameManager } from './GameManager';
 
-export default {
-	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-		return new Response('Hello World!');
-	},
-};
+addEventListener('fetch', (event) => {
+	event.respondWith(handleRequest(event.request));
+});
+
+async function handleRequest(request: Request) {
+	const upgradeHeader = request.headers.get('Upgrade');
+	if (upgradeHeader !== 'websocket') {
+		return new Response('Server is up', { status: 400 });
+	}
+	const { searchParams } = new URL(request.url);
+	const username = searchParams.get('name')!;
+
+	const [client, socket] = Object.values(new WebSocketPair());
+
+	const id = uuidv4();
+	socket.accept();
+
+	const gameManager = GameManager.getInstance();
+
+	gameManager.addUser({ socket, username, id });
+	console.log('connected ', username);
+
+	socket.addEventListener('close', (evt) => {
+		gameManager.removeUser(socket);
+		gameManager.removeGame(socket);
+
+		console.log(`${username} : disconnected`);
+	});
+
+	return new Response(null, {
+		status: 101,
+		webSocket: client,
+	});
+}
